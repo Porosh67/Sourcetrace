@@ -1,0 +1,24 @@
+# Local run on a machine with an AMD GPU (an AMD Developer Cloud droplet, for example).
+#
+#   docker compose up -d --build
+#   docker compose exec sourcetrace python3 /app/app.py --index /app/corpus
+#   docker compose exec sourcetrace python3 /app/app.py --corpus /app/corpus \
+#       --query-id query_01 --query "What is the maximum junction temperature of the TQ-40?"
+#   docker compose exec sourcetrace cat /app/output/query_01_output.json
+services:
+  sourcetrace:
+    build: .
+    image: sourcetrace:local
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    ipc: host
+    security_opt:
+      - seccomp=unconfined
+    network_mode: none # the grader gives the container no network: test the same way
+    volumes:
+      - ./mc3-starter-kit/mc3-corpus:/app/corpus:ro
+      - ./output:/app/output
+    restart: "no"

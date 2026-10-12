@@ -1,0 +1,9 @@
+# torch and Pillow come from the mandated ROCm base image. Do NOT add torch/torchvision here:
+# pip would replace the ROCm build with a CUDA wheel (see README "Two traps").
+transformers>=4.57.0
+accelerate>=1.0.0
+huggingface_hub>=0.26.0
+safetensors>=0.4.5
+numpy>=1.26
+pypdf>=5.0
+cryptography>=3.1

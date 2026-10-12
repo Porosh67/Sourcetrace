@@ -1,0 +1,44 @@
+[project]
+name = "sourcetrace"
+version = "1.0.0"
+description = "Citation-exact retrieval-augmented question answering over mixed documents, built for AMD ROCm."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "Pillow",
+  "pypdf>=5.0",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+model = [
+  "transformers>=4.57.0",
+  "accelerate>=1.0.0",
+  "huggingface_hub>=0.26.0",
+  "safetensors>=0.4.5",
+]
+dev = [
+  "pytest",
+  "ruff",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["app", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["samples", "models", "output"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sourcetrace"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["I001", "E501"]
+"scripts/*" = ["E402", "E501"]
+"app/app.py" = ["E402"]

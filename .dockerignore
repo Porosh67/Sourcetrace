@@ -1,0 +1,32 @@
+# Keep the build context tiny and free of anything private.
+.git
+.github
+.gitignore
+.dockerignore
+
+# Environments, caches, secrets
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+*.pem
+*.key
+
+# Only app/ , scripts/download_model.py and requirements are copied into the image
+tests
+docs
+samples
+output
+index
+models
+mc3-starter-kit
+*.zip
+*.md
+Makefile
+docker-compose.yml
+.idea
+.vscode
