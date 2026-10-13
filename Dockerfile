@@ -1,35 +1,77 @@
-# AMD AI League MC3 mandated base image (ROCm built PyTorch)
-FROM rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_2.3.0
+# syntax=docker/dockerfile:1.7
+#
+# SourceTrace: citation-exact retrieval-augmented QA over mixed documents (AMD ROCm).
+#
+# Important grading constraints:
+# - Use the mandated base image and preserve its layers.
+# - Keep the uncompressed image at or below 60 GiB.
+# - Bake model weights into the image for offline grading.
+# - Never allow pip to replace ROCm PyTorch with CUDA PyTorch.
 
-# Set system environment variables
+ARG BASE_IMAGE=rocm/pytorch:rocm10.0_ubuntu26.04_py3.14_pytorch_release_2.13.0
+FROM ${BASE_IMAGE}
+
+ARG MODEL_ID=Qwen/Qwen3-VL-8B-Instruct
+ARG MODEL_REVISION=main
+ARG EMBED_MODEL_ID=BAAI/bge-small-en-v1.5
+ARG EMBED_MODEL_REVISION=main
+ARG TORCHVISION_SPEC=""
+
+LABEL org.opencontainers.image.title="SourceTrace" \
+      org.opencontainers.image.description="Citation-exact RAG over mixed documents on AMD ROCm" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive \
-    HF_HUB_OFFLINE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1
 
 WORKDIR /app
 
-# Install system dependencies securely
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-pip \
-    python3-setuptools \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# Preserve the ROCm versions shipped in the required base image.
+COPY app/requirements.txt /app/requirements.txt
 
-# Copy requirements or directly install needed packages using the safe --no-deps method
-# This prevents pip from accidentally replacing ROCm torch with a CUDA version!
-RUN pip install --no-cache-dir --no-deps -U transformers tokenizers safetensors pypdf openpyxl python-docx
+RUN python3 -m pip freeze | grep -iE '^(torch|torchvision|torchaudio|triton|pytorch-triton-rocm)==' > /tmp/torch-constraints.txt || true \
+ && echo "Pinned packages from the base image:" \
+ && cat /tmp/torch-constraints.txt \
+ && python3 -m pip install -c /tmp/torch-constraints.txt -r /app/requirements.txt \
+ && if [ -n "${TORCHVISION_SPEC}" ]; then python3 -m pip install --no-deps ${TORCHVISION_SPEC}; fi \
+ && python3 -c "import torch; v=torch.__version__; print('torch', v, 'HIP', torch.version.hip); assert torch.version.hip and '+rocm' in v, 'torch is no longer the ROCm build'" \
+ && rm -f /tmp/torch-constraints.txt
 
-# Copy the actual application files into the image
-COPY . /app
+# Bake the main model into the image.
+COPY scripts/download_model.py /tmp/download_model.py
 
-# Magic Step: Download Qwen3-VL-8B-Instruct directly into the image path
-# and instantly delete huggingface cache in the SAME LINE to save huge space!
-RUN python3 -c "from huggingface_hub import snapshot_download; \
-    snapshot_download(repo_id='Qwen/Qwen3-VL-8B-Instruct', local_dir='/models/model')" && \
-    rm -rf ~/.cache/huggingface/hub/models--*
+RUN python3 /tmp/download_model.py \
+      --model-id "${MODEL_ID}" \
+      --revision "${MODEL_REVISION}" \
+      --dest /models/model \
+ && rm -rf /models/model/.cache /root/.cache
 
-# Verify ROCm torch installation status before packaging closes
-RUN python3 -c "import torch; print('ROCm Active:', torch.cuda.is_available(), torch.__version__)"
+# Bake the dense-retrieval model too, unless explicitly disabled.
+RUN if [ -n "${EMBED_MODEL_ID}" ]; then \
+      python3 /tmp/download_model.py \
+        --model-id "${EMBED_MODEL_ID}" \
+        --revision "${EMBED_MODEL_REVISION}" \
+        --dest /models/embed \
+      && rm -rf /models/embed/.cache /root/.cache; \
+    fi \
+ && rm -f /tmp/download_model.py
 
-# Default command to run the resident server setup required by Match 3 brief
+# Copy application code after the large model layers.
+COPY app/ /app/
+
+RUN mkdir -p /app/corpus /app/output /app/index \
+ && chmod 777 /app/output /app/index
+
+# No network access is required at runtime.
+ENV SOURCETRACE_MODEL_PATH=/models/model \
+    SOURCETRACE_MODE=server \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
+  CMD ["python3", "/app/app.py", "--healthcheck"]
+
 CMD ["python3", "/app/app.py", "--serve"]
