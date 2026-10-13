@@ -1,0 +1,40 @@
+name: Build and Push Massive AMD MC3 Image
+
+on:
+  workflow_dispatch: # Allows you to manually trigger the build via the GitHub Actions UI button
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      # Removes heavy, unused software (Android SDK, .NET, Haskell, etc.) from the GitHub Runner 
+      # to unlock roughly 75+ GB of free workspace disk space dynamically.
+      - name: Maximize Free Disk Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      # Restarts the Docker daemon to ensure it recognizes the newly allocated free partition space
+      - name: Restart Docker Service
+        run: sudo service docker restart
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Builds the massive Docker image natively in the cloud and pushes it to your Docker Hub repo
+      - name: Build and Push LLM Image
+        run: |
+          docker build --no-cache -t ${{ secrets.DOCKERHUB_USERNAME }}/sourcetrace:v1 .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/sourcetrace:v1
