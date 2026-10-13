@@ -12,6 +12,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      # Allocate extra build storage for the large model image.
       - name: Maximize build space
         uses: easimon/maximize-build-space@v9
         with:
@@ -31,21 +32,58 @@ jobs:
       - name: Restart Docker
         run: sudo service docker restart
 
+      - name: Check build files and available storage
+        run: |
+          set -euo pipefail
+          test -f Dockerfile
+          test -f app/requirements.txt
+          test -f app/app.py
+          test -f scripts/download_model.py
+          df -h /
+          df -h /var/lib/docker
+          python3 -m compileall -q app
+
+      # Username is now directly hardcoded to prevent secret lookup errors
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: porosh987
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build image
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/sourcetrace:v1
+          IMAGE: porosh987/sourcetrace:v1
           DOCKER_BUILDKIT: "1"
         run: |
           set -euo pipefail
           docker build --pull --progress=plain -t "$IMAGE" .
 
+      # This checks the ROCm PyTorch build, not actual GPU inference.
+      - name: Verify PyTorch and image size
+        env:
+          IMAGE: porosh987/sourcetrace:v1
+        run: |
+          set -euo pipefail
+
+          docker run --rm --entrypoint python3 "$IMAGE" -c \
+            'import torch; print("torch:", torch.__version__); print("HIP:", torch.version.hip); assert torch.version.hip and "+rocm" in torch.__version__, "ROCm PyTorch check failed"'
+
+          SIZE_BYTES=$(docker image inspect "$IMAGE" --format '{{.Size}}')
+
+          python3 - "$SIZE_BYTES" <<'PY'
+          import sys
+
+          size = int(sys.argv[1])
+          limit = 60 * 1024**3
+
+          print(f"Uncompressed image size: {size / 1024**3:.2f} GiB")
+          if size > limit:
+              raise SystemExit("FAIL: image exceeds the 60 GiB limit")
+
+          print("IMAGE_SIZE_OK")
+          PY
+
       - name: Push image to Docker Hub
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/sourcetrace:v1
+          IMAGE: porosh987/sourcetrace:v1
         run: docker push "$IMAGE"
